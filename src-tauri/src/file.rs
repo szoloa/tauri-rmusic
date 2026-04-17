@@ -226,6 +226,13 @@ pub async fn load_cover_and_lyric(
     file_name: String,
     default_directory: Option<String>,
 ) -> Result<(String, String), String> {
+    use base64::engine::general_purpose::STANDARD;
+    use base64::Engine;
+    use lofty::picture::Picture;
+    use lofty::prelude::*;
+    use lofty::probe::Probe;
+    use lofty::tag::ItemValue;
+
     // Determine the base directory to use
     let base_dir = if let Some(custom_dir) = default_directory {
         // Use the custom directory as base, look for subdirectories within it
@@ -237,16 +244,18 @@ pub async fn load_cover_and_lyric(
             .app_data_dir()
             .map_err(|e| format!("无法获取应用目录: {}", e))?
     };
+    let stem = Path::new(&file_name)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or(&file_name)
+        .to_string();
 
-    // 构建封面和歌词文件路径 - 从base_dir的子目录中查找
-    let cover_path = base_dir
-        .join("cover")
-        .join(format!("{}.jpg", file_name.replace(".mp3", "")));
-    let lyrics_path = base_dir
-        .join("lyrics")
-        .join(format!("{}.lrc", file_name.replace(".mp3", "")));
+    let cover_path = base_dir.join("cover").join(format!("{}.jpg", stem));
+    let lyrics_path = base_dir.join("lyrics").join(format!("{}.lrc", stem));
+    let audio_path = base_dir.join("music").join(&file_name);
 
     // 初始化返回值
+
     let mut cover_content = String::new();
     let mut lyrics_content = String::new();
 
@@ -264,6 +273,55 @@ pub async fn load_cover_and_lyric(
     if lyrics_path.exists() {
         lyrics_content = std::fs::read_to_string(&lyrics_path)
             .map_err(|e| format!("读取歌词文件失败: {}", e))?;
+    }
+
+    if (cover_content.is_empty() || lyrics_content.is_empty()) || true {
+        // 使用 spawn_blocking 避免阻塞异步运行时（可选，但推荐）
+        let audio_path_clone = audio_path.clone();
+        let (meta_cover, meta_lyrics) = tokio::task::spawn_blocking(move || {
+            let mut cover = String::new();
+            let mut lyrics = String::new();
+
+            // 打开并解析音频文件
+            if let Ok(file) = Probe::open(&audio_path_clone).and_then(|p| p.read()) {
+                // 优先使用 primary_tag，否则使用任意存在的 tag
+                if let Some(tag) = file.primary_tag().or_else(|| file.first_tag()) {
+                    // 提取封面（取第一张图片）
+                    if cover.is_empty() {
+                        if let Some(pic) = tag.pictures().first() {
+                            let mime = pic.mime_type().unwrap();
+                            let b64 = STANDARD.encode(pic.data());
+                            cover = format!("data:{};base64,{}", mime, b64);
+                        }
+                    }
+
+                    // 提取歌词（取第一个 Lyrics 对象）
+                    if lyrics.is_empty() {
+                        if let Some(item) = tag.get(&ItemKey::Lyrics) {
+                            if let ItemValue::Text(text) = item.value() {
+                                lyrics = text.clone();
+                            } else {
+                                println!("Can not got Text Lyrics.");
+                            }
+                        } else {
+                            println!("Can not got Lyrics.");
+                        }
+                    }
+                }
+            } else {
+                println!("Can not open probe file. ");
+            }
+            (cover, lyrics)
+        })
+        .await
+        .unwrap_or_default(); // spawn_blocking 失败时返回空字符串
+
+        if cover_content.is_empty() {
+            cover_content = meta_cover;
+        }
+        if lyrics_content.is_empty() {
+            lyrics_content = meta_lyrics;
+        }
     }
 
     Ok((cover_content, lyrics_content))
