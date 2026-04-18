@@ -33,8 +33,14 @@ watch(
   }
 );
 
+interface LyricLine {
+  time: number;
+  text: string;      // 原文
+  translation?: string; // 翻译（可选）
+}
+
 // 歌词数据
-const lyricData = ref<Array<{ time: number; text: string }>>([]);
+const lyricData = ref<Array<LyricLine>>([]);
 // 加载状态
 const loading = ref(false);
 // 当前显示的歌词索引
@@ -44,6 +50,11 @@ const lyricScrollRef = ref<InstanceType<typeof ElScrollbar> | null>(null);
 // 通过状态模拟实现简单的歌词滚动
 const currentLyricTime = ref(0);
 let lyricUpdateInterval: number | null = null;
+
+import { useSettingsStore } from '@/stores/settingsStore';
+
+const settingsStore = useSettingsStore();
+
 
 // 组件挂载时，初始化播放时间
 onMounted(() => {
@@ -105,12 +116,18 @@ function stopLyricUpdate() {
 }
 
 // 解析LRC歌词
-function parseLyric(lrc: string): Array<{ time: number; text: string }> {
+interface LyricLine {
+  time: number;
+  text: string;      // 原文
+  translation?: string; // 翻译
+}
+
+function parseLyric(lrc: string): LyricLine[] {
   if (!lrc) return [];
 
   const lines = lrc.split("\n");
   const timeRegex = /\[(\d{2}):(\d{2})\.(\d{2,3})\]/;
-  const result: Array<{ time: number; text: string }> = [];
+  const timeMap = new Map<number, { text?: string; translation?: string }>();
 
   for (const line of lines) {
     const match = line.match(timeRegex);
@@ -121,12 +138,30 @@ function parseLyric(lrc: string): Array<{ time: number; text: string }> {
       const time = minutes * 60 * 1000 + seconds * 1000 + milliseconds;
       const text = line.replace(timeRegex, "").trim();
 
-      if (text) {
-        result.push({ time, text });
+      if (!text) continue;
+
+      const existing = timeMap.get(time);
+      if (!existing) {
+        // 第一次遇到该时间，先作为原文
+        timeMap.set(time, { text, translation: undefined });
+      } else if (existing.text !== undefined && existing.translation === undefined) {
+        // 已经有原文，且还没有翻译，则当前行作为翻译
+        existing.translation = text;
+      } else if (existing.translation !== undefined) {
+        // 如果已经有翻译，则覆盖或追加？通常不会，但为了安全可以忽略或作为另一条原文
+        // 这里选择忽略，或者你可以创建新的独立行（但一般不这样）
+        console.warn(`时间 ${time} 已有翻译，忽略多余行: ${text}`);
       }
     }
   }
 
+  // 转换为数组并排序
+  const result: LyricLine[] = [];
+  for (const [time, { text, translation }] of timeMap.entries()) {
+    if (text) {
+      result.push({ time, text, translation });
+    }
+  }
   return result.sort((a, b) => a.time - b.time);
 }
 
@@ -212,20 +247,25 @@ function updateCurrentLine() {
 async function scrollToCurrentLine() {
   await nextTick();
   if (lyricScrollRef.value && currentIndex.value >= 0) {
-    const container = lyricScrollRef.value.$el;
-    const activeItem = container.querySelector(".active-lyric");
+    // 获取 ElScrollbar 内部的滚动容器（.el-scrollbar__wrap）
+    const wrapElement = lyricScrollRef.value.$el?.querySelector('.el-scrollbar__wrap');
+    if (!wrapElement) return;
 
+    const activeItem = wrapElement.querySelector('.active-lyric');
     if (activeItem) {
-      const containerHeight = container.clientHeight;
-      const itemTop = activeItem.offsetTop;
-      const itemHeight = activeItem.clientHeight;
+      const containerHeight = wrapElement.clientHeight;
+      const itemTop = (activeItem as HTMLElement).offsetTop;
+      const itemHeight = (activeItem as HTMLElement).clientHeight;
+      const targetScrollTop = itemTop - containerHeight / 2 + itemHeight / 2;
 
-      // 将当前行滚动到中间位置
-      lyricScrollRef.value.setScrollTop(itemTop - containerHeight / 2 + itemHeight);
+      // 使用原生 scrollTo 实现平滑滚动
+      wrapElement.scrollTo({
+        top: targetScrollTop,
+        behavior: 'smooth'
+      });
     }
   }
 }
-
 // 监听当前歌曲变化
 watch(
   () => props.currentSong,
@@ -297,19 +337,14 @@ const lyricContainerClass = computed(() => {
     <div v-else-if="!lyricData.length" class="lyric-empty">{{ t("lyric.noLyric") }}</div>
     <el-scrollbar ref="lyricScrollRef" height="100%" view-class="lyric-scroll-view">
       <div class="lyric-lines">
-        <!-- 顶部空白，确保第一行歌词可以滚动到中间 -->
         <div class="lyric-line lyric-placeholder"></div>
-
-        <div
-          v-for="(line, index) in lyricData"
-          :key="index"
-          class="lyric-line"
-          :class="{ 'active-lyric': index === currentIndex }"
-        >
-          {{ line.text }}
+        <div v-for="(line, index) in lyricData" :key="index" class="lyric-line"
+          :class="{ 'active-lyric': index === currentIndex }">
+          <div class="lyric-original">{{ line.text }}</div>
+          <div v-if="settingsStore.showTranslation && line.translation" class="lyric-translation">
+            {{ line.translation }}
+          </div>
         </div>
-
-        <!-- 底部空白，确保最后一行歌词可以滚动到中间 -->
         <div class="lyric-line lyric-placeholder"></div>
       </div>
     </el-scrollbar>

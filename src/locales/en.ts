@@ -61,6 +61,7 @@ export default {
     about: "About",
     aboutDesc: "A music player built with Tauri and Vue",
     language: "Language",
+    showTranslation: "Show Translation",
   },
   musicList: {
     title: "Library",

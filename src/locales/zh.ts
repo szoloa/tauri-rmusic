@@ -61,6 +61,7 @@ export default {
     about: "关于",
     aboutDesc: "一个基于 Tauri 和 Vue 的音乐播放器",
     language: "语言",
+    showTranslation: "显示歌词翻译",
   },
   musicList: {
     title: "曲库",

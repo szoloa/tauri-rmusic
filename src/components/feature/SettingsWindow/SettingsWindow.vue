@@ -14,6 +14,10 @@ import { useLocalMusicStore } from "@/stores/localMusicStore";
 import { enable, isEnabled, disable } from "@tauri-apps/plugin-autostart";
 import { setLocale, getLocale, type LocaleKey } from "@/i18n";
 
+import { useSettingsStore } from '@/stores/settingsStore';
+
+const settingsStore = useSettingsStore();
+
 const { t } = useI18n();
 const themeStore = useThemeStore();
 const localStore = useLocalMusicStore();
@@ -117,6 +121,9 @@ onMounted(async () => {
     console.error("Settings window error:", e);
   }
 });
+
+
+
 </script>
 
 <template>
@@ -161,6 +168,15 @@ onMounted(async () => {
             </el-select>
           </div>
         </div>
+       <div class="setting-item">
+          <label>{{ t("settings.showTranslation") }}</label>
+          <div class="setting-control">
+            <el-switch :model-value="settingsStore.showTranslation"
+              @update:model-value="settingsStore.toggleShowTranslation" :active-text="t('common.enable')"
+              :inactive-text="t('common.disable')" />
+          </div>
+        </div>
+
       </div>
 
       <div class="settings-section">
