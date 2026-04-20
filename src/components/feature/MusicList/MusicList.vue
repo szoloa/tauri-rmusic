@@ -284,6 +284,7 @@ const { useVirtual, virtualList, containerProps, wrapperProps, rowHeight } =
             <img
               v-if="coverById[row.id]"
               :src="coverById[row.id]"
+              loading="lazy"
               class="cover-img"
               alt=""
             />
@@ -364,6 +365,7 @@ const { useVirtual, virtualList, containerProps, wrapperProps, rowHeight } =
               v-if="coverById[row.id]"
               :src="coverById[row.id]"
               class="cover-img"
+              loading="lazy"
               alt=""
             />
             <div v-else class="cover-placeholder">

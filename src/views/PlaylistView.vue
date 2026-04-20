@@ -369,28 +369,6 @@ const resolvedItems = computed(() => {
   return result;
 });
 
-// 为本地项异步加载封面
-const coverByKey = ref<Record<string, string>>({});
-watch(
-  resolvedItems,
-  (items) => {
-    items.forEach((entry) => {
-      if (
-        entry.item.type === "local" &&
-        entry.musicFile &&
-        !coverByKey.value[entry.key]
-      ) {
-        loadLocalCover(entry.item.file_name, () => localStore.getDefaultDirectory()).then(
-          (url) => {
-            coverByKey.value[entry.key] = url ?? "";
-          }
-        );
-      }
-    });
-  },
-  { immediate: true, deep: true }
-);
-
 const displayItems = computed(() =>
   resolvedItems.value.map((e) => ({
     ...e,
@@ -400,6 +378,48 @@ const displayItems = computed(() =>
 
 const { useVirtual, virtualList, containerProps, wrapperProps, rowHeight } =
   useVirtualListWhenLong<ResolvedEntry>({ source: displayItems });
+
+
+// 按需加载封面的函数
+async function loadCoverIfNeeded(entry: ResolvedEntry) {
+  if (
+    entry.item.type === "local" &&
+    entry.musicFile &&
+    !coverByKey.value[entry.key]
+  ) {
+    const url = await loadLocalCover(
+      entry.item.file_name,
+      () => localStore.getDefaultDirectory()
+    );
+    coverByKey.value[entry.key] = url ?? "";
+  }
+}
+
+// 监听虚拟列表的可见项变化，加载封面
+watch(
+  () => virtualList.value?.map(item => item.data.key).join(','),
+  () => {
+    if (!useVirtual.value || !virtualList.value) return;
+    // 仅对当前可视区域内的条目加载封面
+    for (const { data } of virtualList.value) {
+      loadCoverIfNeeded(data);
+    }
+  },
+  { immediate: true }
+);
+
+// 如果未使用虚拟滚动（列表项较少），则对所有条目加载（或也可用 IntersectionObserver 懒加载）
+if (!useVirtual.value) {
+  watch(
+    displayItems,
+    (items) => {
+      for (const item of items) {
+        loadCoverIfNeeded(item);
+      }
+    },
+    { immediate: true }
+  );
+}
 
 function isCurrent(entry: ResolvedEntry & { coverUrl?: string }) {
   if (entry.musicFile && playerStore.currentMusic)
